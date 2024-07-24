@@ -1,0 +1,127 @@
+package com.boranget;
+
+import org.bouncycastle.openpgp.PGPException;
+import org.bouncycastle.openpgp.PGPPrivateKey;
+import org.bouncycastle.openpgp.PGPPublicKey;
+import org.bouncycastle.openpgp.PGPSecretKey;
+import org.bouncycastle.util.encoders.Base64;
+
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+
+public class PGPUtils {
+    public static String enc(String ori, String clientPrivateKeyBass64, String bankPublicKeyBass64, String privateKeyPassword) throws IOException, PGPException {
+
+
+        // Declare PGP helper instance.
+        PgpHelper pgpHelper = new PgpHelper();
+
+        // Declare output string.
+        String encodedRes = "";
+
+        // 加密结果输出流
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        // 原文输入流
+        BufferedInputStream inputStream = new BufferedInputStream( new ByteArrayInputStream(ori.getBytes(StandardCharsets.UTF_8)));
+        // 客户端私钥输入流
+        BufferedInputStream clientPrivateKey = new BufferedInputStream(new ByteArrayInputStream(Base64.decode(clientPrivateKeyBass64)));
+        // 银行公钥输入流
+        BufferedInputStream bankPublicKey = new BufferedInputStream(new ByteArrayInputStream(Base64.decode(bankPublicKeyBass64)));
+
+        try {
+            // Create PGPSecretKey object.
+            List<PGPSecretKey> key = pgpHelper.readSecretKey(clientPrivateKey);
+            // Get PrivateKey Objects from SecretKey using passphrase.
+            List<PGPPrivateKey> clientPrivateKeys = new ArrayList<>();
+
+            // passphrase
+            for (PGPSecretKey pgpSecretKey : key) {
+                clientPrivateKeys.add(pgpHelper.findSecretKey(pgpSecretKey, privateKeyPassword.toCharArray()));
+            }
+            // Get PGPPublicKey.
+            List<PGPPublicKey> pgpPublicKeys = pgpHelper.readPublicKey(bankPublicKey);
+
+            // BEGIN ENCRYPTION //
+
+            // Taking the outputStream, inputStream data and keys to encrypt the data.
+            pgpHelper.encryptAndSign(outputStream, inputStream, pgpPublicKeys.get(0), clientPrivateKeys.get(0));
+
+            // Encode in Base64 for sending to the treasury API.
+            encodedRes = Base64.toBase64String(outputStream.toByteArray());
+            return encodedRes;
+            // END ENCRYPTION //
+        } catch (Exception ex) {
+            System.out.println("**** Exception ****");
+            System.out.println(ex.getMessage());
+            throw ex;
+        } finally {
+            if (outputStream != null) outputStream.close();
+            if (inputStream != null) inputStream.close();
+            if (clientPrivateKey != null) clientPrivateKey.close();
+            if (bankPublicKey != null) bankPublicKey.close();
+        }
+    }
+
+    public static String dec(String encStr, String clientPrivateKeyBass64, String bankPublicKeyBass64, String privateKeyPassword) throws Exception {
+        String res = "";
+        // 客户端私钥输入流
+        BufferedInputStream clientPrivateKey = new BufferedInputStream(new ByteArrayInputStream(Base64.decode(clientPrivateKeyBass64)));
+        // 银行公钥输入流
+        BufferedInputStream bankPublicKey = new BufferedInputStream(new ByteArrayInputStream(Base64.decode(bankPublicKeyBass64)));
+
+        // Declare PGP helper instance.
+        PgpHelper pgpHelper = new PgpHelper();
+        // Declare input stream.
+        BufferedInputStream dataStream = null;
+        ByteArrayOutputStream decryptedResult = new ByteArrayOutputStream();
+
+        // Read in public key, private key and input data (to be encrypted) file.
+        try{
+            // Create PGPSecretKey object.
+            List<PGPSecretKey> key = pgpHelper.readSecretKey(clientPrivateKey);
+            // Get PrivateKey Objects from SecretKey using passphrase.
+            List<PGPPrivateKey> clientPrivateKeys = new ArrayList<>();
+            // passphrase
+            for (PGPSecretKey pgpSecretKey : key) {
+                clientPrivateKeys.add(pgpHelper.findSecretKey(pgpSecretKey, privateKeyPassword.toCharArray()));
+            }
+            // Get PGPPublicKey.
+            List<PGPPublicKey> pgpPublicKeys = pgpHelper.readPublicKey(bankPublicKey);
+            // BEGIN DECRYPTION //
+            // Decode the encrypted Payload
+            byte[] decodedPayload = Base64.decode(encStr.getBytes(StandardCharsets.UTF_8));
+            // Convert decoded data to InputStream.
+            dataStream = new BufferedInputStream(new ByteArrayInputStream(decodedPayload));
+            // Decrypt the data.
+            pgpHelper.decryptStream(dataStream, decryptedResult, clientPrivateKeys, pgpPublicKeys);
+            // Convert decrypted data to String.
+            res = decryptedResult.toString("UTF-8");
+            // END DECRYPTION //
+            return res;
+        } catch (Exception ex) {
+            System.out.println("**** Exception ****");
+            System.out.println(ex.getMessage());
+            throw ex;
+        } finally {
+            if (dataStream != null) dataStream.close();
+        }
+    }
+
+    public static void main(String[] args) throws Exception {
+        String ori =
+"{\"transactionDate\":\"2024-06-18\",\"accountNumber\":\"622001234015\",\"accountCountry\":\"CN\",\"enrichedReport\":\"E\"}"
+                ;
+        String clientPrivateKeyBass64 = "LS0tLS1CRUdJTiBQR1AgUFJJVkFURSBLRVkgQkxPQ0stLS0tLQoKbFFXR0JHWnIyZW9CREFDazdOZHFWSzlTWkFham5OQWxHUnM1VlZoV3A1eUtHVW5EK0NxZGlJbDJHU0tFeklYNwpsYmF3blI2M0pOdm5JU0hvL3prdlhvVXFqMTlyd1dubEdNcTZsZU1CcjBiMDRHRFZHUnN5WG1GR1lrUHNnZmE1CjdJOGRQZ2tZc0xoSmhwdENHblFDbnBoWW4wMW5JcUN5eXp0eTFTZFd3VHo0TnJkcFNuUzRYZUxCeUdyalVGcHkKMS9HeElOMEFWNDZ3M1YxWlZjKzFxNXdaMmVCamRIRFNHVE8yNHJQTExiR1ltTGlCb21vWm1ld2NmeUJDVnhiTApQaVlWWC9QWjF1OTg1akRpb0JBbW4vVGZCZGQxelJzU3M3WkJFY3ViZHA0elpzRE13ZUlobzhiN3piWGpybG9VCklVUzBnbFh6Q2pSMFpNbXZHaXU0T05rZSthRm1HYVVKdjM5LzFGZGNRUmw5STd4SHcydnJzU0hGNUl4Qnp4am0KMGpuODZIZ3dUOTErN2tDVWNEdlJQR0tVNFhiaUNnMjd0aGEvbkoxUGU5NFFKNXc4RGx3MjRnbW1NckhKZndEQQpOYzRBcitYUko2TU1rR1FUSlpNa1k4cjZCU0psOXdmNDJZTDZUa3V1cVVaU1BHQVRLOUlzK1Q3QmZIR0FjSU5WCkJhK2xMbGNkTUkrbGZJMEFFUUVBQWY0SEF3SnFsaE5lZHBsWlUvL2VRU2F1SFl5VHN1YTdqSVNLOEJ5cElYc3MKQkpnNHNUY2Q3dWFjdzZNSThxdFhPZUVyTGZPWENZSTdsTTltQnZtck9MOHIxa2xEcUFDZ3JMLyttcWRWUjZsNwptY09yQTV1UjVJaTlLbzh1ZW0vSHozT0hnT0ovZGVkQUNsYzZhSXM3bWRzdzRzd3AyN2ZPTlR4K3ZIQ0poVDVkClgvZ1NySHdiamhsMUtCbFhHNjFNUDFDbUFyMjBoVkhGZEZNc0I3VzVWc0VidlJtb1FVek1TNFVnc1c4anRoeWgKL1lSN3VDTTR0anE1SWhIYUE2eU5ldkhIb0RRMGVrQ0FMT3lqR3pVdEpzdWVTd212M2UvS2NFQ3I3S1drb1hvUgp3WWJ6Rlp1QU9HR0tPYVhmL1JzaExkNW14K2FZNHh0MkhwUCsrbzFBNkM1aWp4K29OSXFzaHRTbFVhQ2ZqaDhLCnNoZnhrVXdsb0VaakNtay9nOG91RVk5M3lzQW9Ua3EyZWMrM0ZEbUdwajZ1L3VxVXdGS0FDUGkxbEUrMVMzZ0IKb3RiMWpObDlWOHN6QnFJMGVrM1RLYTNpaXpIaHJoaUhVS1RmdzRSUXlHS2lHTjhKanB3aERQQWRsaXlWdlpVQgpUcnllaFlMWHdZbVRLVC9mYVBSeDV3R0VMTGZydWxIRDA1OGxsVzFFK3RUM2lGb2QrRXJ1QWhiWU1OcFkvZGswCmpIVVBvSElXK2xZa3BrWk9CSllYaENYNkRJZzQweTc5VGtsNFFtY1dobGRhTzlPanplRHlZTVR4RHl3NktQNHEKcURzcVVPaUluTFRGTVFqaGMyV2RMS1NWSkFHOURoZmg2c2dqdm9YeHI1V1BTQlBCYnJzVGVDQzdWc3dZUFZVNwpId1lUQmdPZmtTbFdUcFRUMDNadXg3RXdTOXlJL2hUb0p3ZStWSlpXR2lrNXFyS2xJenFZY1VSSTBoUTY5SnZCCkFscXRINWF1RkZmeFhGMjJkNTNqamN2UkQ5NzEwT0tjWmVJWURnMUI2Zm85R0p6eTBqK1JmaG1Id2xjazdoNDUKQ2VXeU9oUW9IUkdhSmxDNDRveEZIV0hBcCttUktFZ00yVTFKeXNMempwaUFzMzdiMnUxeENLSjlEMGNNdG0yYQozZjlCK1ZJTk5xcmtYN0ZTRmxGc0hWSnpWTUZFeVJzbUJsOTk2YVlvc0FzdUI2eUVFLzkzSloraktWZS9RTnI2CjZaTGttdktrZ1FJRldFYTg3WWx0SExIeDJaUWZpdWI2SFJRWlFHWlhlaUFJWE1XcXRKRWJOWFRkMmwxbkdQaksKN1Q2akJhMjZzOVBaUk1wRVpZZExDU294QVZvY3pPZGZPelNicFhnUC9SU3ZhVjc3OTdPWXNNTkRzSHRNYk8vUgpmMzg4LzQ4ckJaTHpDeDdZL3pQdk1kNzRFMnVyRERSU0lPdGV3dExQc2NSekx3QnU4Q3U2R3lieFQvVmQ4OE84ClpaOUhNaDQzTjJ4NnovNFVHdml1bDViWncvWkQ0dXY0WHlvbUNyd1JUVVlWdTQ4SFdHVjVDYk95cTVhUDRoekoKSUFyZFhxRUZCSGR3dlhaUTJFYWIzbklQRUM2S1ZoS3ZSNzNpMXdZaVpaem9RNHBpOG1iWnh3aTdpNklNUUYzdApDWXc4K004ZkVWS2hnRFNlM1hob2FVSy83OG5WeS9sNVdoTGRHY2xxWkRiZXhTWDZPNDBDNy9sYXNOUkxlM0tUCjlFenhrQ0VsU2NEcDgzVU9kblkrMjZ6aU9KZ3lYb1h1N3JRdWJITm9NbWh6WW1NMFkzQnBJQ2htYjNJZ2RHVnoKZENrZ1BHeHphREpvYzJKak5HTndhVUJzYzJndVkyOXRQb2tCMUFRVEFRb0FQaFloQkZYb0UyVEJkYVlKcEpGMwovTlhsbmxjcWw4RXhCUUptYTlucUFoc0RCUWtEd21jQUJRc0pDQWNDQmhVS0NRZ0xBZ1FXQWdNQkFoNEJBaGVBCkFBb0pFTlhsbmxjcWw4RXhQQjRML1JjZXpmOUNCdXBsUmtYKy9OUVlhS0xZSkowZWpDMjFhbC9xNWZvTUUzaFgKUkdiNjVJdTJCQzRxVlZUYmdnV2N6eWlScGl0MmlxTXY2Y0RWdHFpZTVlTWFQeHZzSmxSQWVFdVFhL2FubDRSTQpnYjg4YURWV09mdmtCMW1uUWxRd1VCM2ZXSDY5VGZMeiswSTVqQ1p0WlA3dXJRb0d4bnA0d2VsYlNiYnVQcXczCkZqWHN2ZnVQM3p1U3pGazBrV2JDTUpCcnJ0UGg1Um5oOWI3TzJpUU5aY211ZFpGZUQ3bTF5ZjBGRHZUNlZmeEsKVFVtVGVNMGVlL3REMGJ0R2MvQXFwa0x5bWwyTGpkSnZqd0dRMGpyaVEzZlBkbERPZ3ZYWkt3MURRQTdyRUJVSAozVURHVFRheUlGL3RoeGEzMkhIZW5YUS9jU0YybjU3NllKcGY3UWIyMlRDNXF6Q2pOTHpJZ2NVTUszL20rellxCi8vWU13SFAvZmJHQ2FNSDJxVVZmMzRSdW4xRHVBVkMyTldyUitCbmw0TE5aelJDTDNvWDNNMkVtK2xQekVTQ2YKVnZTbzVNb09ZVS9PZHgvUUFadWpVMTRMSGE2RWF4cUVrYkFnbEhSV1k3S1AveFJIVy8zNXg1VnIydzZkQzdDUgplSnMweU9DZStXWHg1QkhFWmZBdk5wMEZoUVJtYTlucUFRd0F6MzBSTjcvVGVSckNJYjZneVJldE4wa2l1OW85CjZZOUdVNUdlUGNqWmpodEVXYVVzU2phaWZzMlZXR1JBTTIzZjhLMGNrYjBWNnNhM2YwQmlpZzcyZGtWZzhTb0UKR3dBOEJNU2hlbHk2TDRXaGY4TEd3ejh3Y2FPMWNBWjVZejFOMTR6anhvczBVQy9XL1M0dmJlM24vMmpyY2pZcAo1MFhuRDVndXB6L1ZTV205NkhxcTFXZGQ4bEhQeGtiZE5hU1QyUjIycVlOZTV3ZU1LeHpuWW5WWk1HZHFLNDdKCnYrQnZOL3lOUlJ0QjhEdFd5MVhEeVU0QjVnSldoUEduSGF2RzdxOEF2SDNkQlVFQTlVbW95dE92YVQvY29SNkkKMUJsUjdtTHIxNG92WmhONUtPSjZLS1o2MnRwa2V6MW5WeHZFYTc4S1JoRytFSzFIOU82bzZRM0JhUXdjbEhjawpZazE4c0lDcDJYR044VjBEUThFakp5d2g5TmxZYUgySTdRRThNaFBFRG5CWm5yTDhGeGZIcUVFZldNVHJYVDVECkxtRHBmVDhZa0tuNHBkZXFqMm03R21JbmxMeTZqVVcwUVJHV1loZlJReXF1UUNmZU5vYWZkdXhBMDhLdlVRM1gKekVVaXNrL25lbDI2eEQyQzlSUmNBbHF5SVpHcCtVS21yL1d0QUJFQkFBSCtCd01DdlVNNW5FbkpjY0wvQ0ZKagpwYjFDVVMyWVorNGVTMFZZOU9Yci9UTisraWNKSWJtV3FzbGxIdUpZQ1VnQnpVOVF0a045Yjd2YUQ3c3A4a1RaCllCeUc2N1BBK05PR1pDREhBVVpldDRYMUI4bktUZ2hTd2pWcnBQUWNNdHFhU0pnQjAyd1Y1M20xdER3c3lYSUEKVFFnVEIzTUxhekNaMHVjMm5XR3RlUGZQSTF5TjFHUWwreWRJQzBxc0NlakRHc1lTODhCSXByQlJlcUhuQ2ZrZgprTC9mZlZ2RTRnOWIxWHp5UFZ4T25ZdlZDU1pOc1o5OFA4OGNZZkJYeXcrT2tNTDk1WUYwTFA3cEVNa3hxekI4CnNrM3ZWdlNRVVZzZ3cvMzZnbDcwVlB5UmgwdmJ4ZU9Mb3FHNm9uaThBNnBWdVczeFk2eHlKTWcrWVZQSGZETDQKV2FkTngyemtlTXlSTnB6Ni85ODNTS0hMZ2c4U1B4UjM0dm5ESkU5M3BqcENxbGhWbnEvaFFxNFNkaUljNWN3dQpFa3V4emFHZitjQkNhSnh3d3JhTC9XNCtkRDhEQ0s1NkZrNTBHZllhNGhscDkwOWxRWUVGU0tGdXZ6SFZzem5YCms3RTBqV2VWcUF6aFlsODk0Zi84MzRZdFY4MTRmMWZHejdZS3FjSTNCL2tSeWhWNmdEeFJ6Sjl6WEtjWTlDUFIKQVlNZHpablVwQlBBdkFJYkRZSjAzeUtNcjVDT1NyMlJZdUxwOVI0emJjcXo2bDIvUTIzNEViTXA1UnF0R1JpegpHQjZ2UlBuZlZHdWkyZ3NQL1dTaVZGZVNwVjVRbjVKdnJuTE43YU1RRFEwWVBTd3d2RHRnU0puT0dqcVRvYTVjCmlua3llR1dXOG9xQUxWaWErK1d0YUovNzExZHBJVXJld2MvOFlmelA4bm9TZDhKd1gvWVIxUHl6c3ExSDMvVkgKV2VDenBCWXNrdzZhM0kyM0tPWEZCVmhBZDQ3VURkSm9DKy9zT0JPT21ORDlCT2Ezdkh3cUo1VzVra0h0RE16RApLVUg2bjg0OFBVQkNpQi9QRXg0OHBUS1BFSG1NZnR2cjFoWGpZczdsY3lTVERQblVvejdpdkZCT1BiQmFjdWJJCkRrQ3Nud2RoZ2wxQXUwcmRmalpSYXlmUkFSTlRjODBBZmZTRjNQN0ZJY3RWTUJJMlQvbUV3VzM5QkNtWVJRUXAKS3p5bGtPTmk1Mm1IeWlONG5MSnRRRmlOY3BldEt6Vk5qdGFQYUlMMUUxeGxKcGxGVk00TnlyY3VHeFJ5SDUrQwpCcG13YUlQalFkU2laRksrYVdndFo4UmNsRWIzNHluZ3RaeURrK2QwaXZHa3d4QkJmME9sSjZOSFBGUDUvci9EClljQ3JnUEhRWTFrS3JGeTVIREdXWFFkUk1XNWdWeVNRNUUrUnB4TTFSRVdlOHN1V3FPUG82QnBBNnFQYlZsQzAKU3dnTmRVMFBqTlVpa1VDeHpNeFFwTDBpYS90d09GanExVXdCMU13WmZ5RzFrNUR6bzZzUUN0V3NXWkNPdENxSQpKcGlrZWlhTCtXSmVKUVB5aFYrcnZnN2h3djBtdWJ3K2s2Y1p6WFNNejR2NjdMSExIaGZwQ255amFtdUNpTWNJCjRJS0ZQNXR2K2FQOWhYSklURUN5Zk5wVDVVbU5VbEhERFNxRTBrMTN5ZHc5eDQ3UGdTWHByeEhWcWg1TklZUnoKcmVSRm85S1pJVXFtL0Y5YitBeEhhMmNGZVVTUkJnMk96aUNJK21zVGs5V0cvTUxCRXM0aEVZa0J2QVFZQVFvQQpKaFloQkZYb0UyVEJkYVlKcEpGMy9OWGxubGNxbDhFeEJRSm1hOW5xQWhzTUJRa0R3bWNBQUFvSkVOWGxubGNxCmw4RXhCbWNML0E5RHVuZzdzbkZYL080MkZuS3Z4ZHEyOUQwTHpGNnh2bUlJQ3VUQnVVRW92L1FSdGFkcXIrekoKNVFCSDA2MDRUM0Z2elk0Q0N2TFVTUktNVDBoc2VIaVg3aWFaNExvSXVicTgxbGlNbmxaUFI1NnQrdkxjVXNocAo3MzlobVZLY3o4cVFOL05JamJOT0QyVTd3Z1NydCtSV3VUV0Voc0w1UFdWWUZwazRhS1JSSnRxNkRhcXE2cWlWCndDSndjZk1UQ1RzL1lHdUhVOUpDVU91NGphSFJGL1d0M2JPeC8vY1l6c0ZTMVkwM1k5WjU3OHRUN2Q0WE5ZdVgKb1VucGlvdk9ybWZDZDM0b2hqdEdwOUhFVzJ5ZVBzTUx1RWxoZldnbDUyM1p4dk9lZ3hNQVdidkliZHJvRWFkagpsZFJ4bWVoQk5FWkt4M1cyNU84OStBekNITUUxeEFaSTlnMlgvQWNseGtaMFZKcXNuVkw4UnZONmpSY3ZIdkFtCktaWEtzc3FKamg2czhxblpvWEsxUitUVklLSXYyRTB6Q2JiNVFENVpveVlPeEg2Ykg1QXpnU0tVQTdsT29sQ1UKWTYwblpuWlB4ZmdWckRBY3RBNHpJdmxYY21vOHhDdFdQVzdPSWJLSWZOb3JEZmphNTh0NnZzTWh1WUFGWFQvUwpNTWZtbW90dmxnPT0KPXhzVmEKLS0tLS1FTkQgUEdQIFBSSVZBVEUgS0VZIEJMT0NLLS0tLS0K";
+        String bankPublicKeyBass64 = "LS0tLS1CRUdJTiBQR1AgUFVCTElDIEtFWSBCTE9DSy0tLS0tClZlcnNpb246IEJDUEcgdjEuNjgKCm1RSU5CR1BIcTEwQkVBRG5FVUt6ekVqNmE3REk2ZGRqRkNHSHd3b0FrZDN6MzNhSDcrTWF5Qmk2SERmcDdLdUcKSEpQdXVoUzlqU3VCaUorb2NhaGVFNk5WUG9HWlh3L0E3TmhmOHFUdUlNWk5HZWFvOWRrd2tGZnUwVGdqVkgrdwo2WTMva2dTUmtzZVN2L1RvZmlWWVN4MjhvNU5jMnBpM1ppZDc4VjlBcnRnTE81emdjN21uMUlMUWRzenV0bHVhCmVnRUtOR3Z2N1Z0RjRIV1I5NDg1QUVxRTJDRDZKQVBwYTRpbVVRS29ISk9hanFGYzVsNkcwWFBTeTdDUG4yK0kKMlhCQThNdzFHVVJrSnZHNURVUWRlWGFPN1JVTGtWdDVXYlltQ0dvQXhnTTN0VERyL3RsbDErKzE3MGpUUWRGbApkamgrQ1RuQW8zN1U1UDFHOC9nR2RQRnJoenBCbmgzeEpOZlBzU2dxSzFBc0ZXak5vbjMrTTducXdLRU92Mm5nCnh3OC8wS0FLRHVRNmtrU2FrNzBzNkhSenJUTFBZZGZxZXF2VEZ2RnIrREtneEZTamhBRGw2aGYrMXVJSm5JUzcKMlVKVDhFYWROL0ZMNFJlM1FZdUsvZGhETGN1NitDVERrd1dnSWlrekNoeGgxTit3TnRrU1pTcEhtVTZSUkgreApOKzRoOG1NVGcrd3E3NGRYS0NSMDd5U0k4NS9YV1FaV3JyTkRTMDNJQ01lVjZvc1F6WENlTW1hOFA3bnkxaEM0ClAxdFpva0U2NzRCV2hiZ2Q4K3Y5U3Q4ZWtBeWQzSmJKeGNQY2dybjZ3eEptdHR1Z1Q3U042TzMwWkdrTTVrNVUKMzlmSE9YbjIyNmxTWFhnbHQ0TGJSSHpyUXlRU1l0b1l1eFhkK1Y3YzlEMWxWcVhQOHBTZHBPalhud0FSQVFBQgp0SE5vYzJKalgySnBjMTl3Y21Wd2NtUmZjR2R3WDNCMVlsOXJaWGt5TURJek1ESWdLRkpsYm1WM2FXNW5JRkJIClVDQnJaWGtwSUR4amJXSnBkR052Ym01bFkzUmthV2RwZEdGc2JXRndjR2x1WjNaaGJHbGtZWFJwYjI1QWJtOWwKZUhSbGNtNWhiRzFoYVd3dWFITmlZeTVqYjIwK2lRSkNCQk1CQ0FBc0JRSmp4NnZDQWhrQkJ3c0pDQWNDQkFFRgpGUWdKQ2dzRkZnSURBUUFDR3lNQ0hnRUNGNEFGaVFQRHVJQUFDZ2tRRHZPUnZVQWFDeUpCQlJBQXliUFJWdkJECmJ1Mk1Qc2t5cVJHQWllNGVEQlZPWENmMVk3dFV1MTd0NjJsbmw0L3VuR1BjdWZ4RmdlMHF5NjZ1dHJnNGlhSnoKVVo3Tm1iNFIyV0pHMXpTQTU0R2hRYUVKTXVlak1TaCtuSHVlbTFPa0JRVDlsUWQydjdMZGhPRVhjaU1adk5GKwo3LytCNlJjcXRlYzdwTDJ4ZUtrN2lST2dBZ3JlSDZUaDY3dTBIK0dQUUQyNXNnUEJGaVpEVmVCTndYcERHZEFhCnNWSHhnVkRiVnU5Nm1pWlJwNjVQNzRSRXhxUkdVNzlIWndjMk4xcjIwUldWS2RlbE1ZK3kyem5tMjRXTktEMk8KRiswV0pxdGZLdHlGTGxTZ1hEbzBqcVRRdCsvUytGOVI0OTB5c3RER2hoUVRTQzJQWlNmeUdyc0hLazIvd1hqRQp4MDhaOWZhb1U1dGI4dE1PblpsbnFaSFBQM0lCK1B4b0NZS1JSSmN2bmcyKzlKMUY1WEpNUmRQUi9QRXYzZ1o1ClJ4Wi9UY2djQklXUkdma21YbUF2elJza0NKRXZlOW1qei9OWGxLb0oxSDROZnFwY1l1aVVDMDFlTE92bG9RaTUKbDcwWjJqc0tCaVQyVjMxT2NMOXhpN1hnTk5DbVZTQUdMZ3hMZTVYaE1jVDc2N2RVdHh3OCtnN2lOelQ4dkNLSgpPem9NWEZ3V2lLQnVrb2tVU1ZtY2pBMkZrcTV0ZG5XdEUvajNIa3ZRVmJjeUFHc00vMjVFRVZXWjlZK3lOTG5kCmREZG1rY1NIS0dNKzFZMXByYXROMUZxUjY1cHI1Q0d3ZUQ2bWJKZi9abDFNVldDZjdKNHpCVUtTOUFpQXF2OXYKVDBuYlFXSmNMMzNXTldJUUh1cXoyTWtCaHRvZjd0a0owSzY1QWcwRVk4ZXJYUUVRQUxFY01jUnRBS0xURTJ4TgoxQkFNV21WbXgvMmlIaFd5WnVqSUJ2OEl2M2ZVM1JtUFdsaE9LUEFiKzdNZTNLQU83NURwQ0M2M0ord3ZDTllDCmNMckE1bUV0MHRCNTNWbU9mTndiaVhEbHVVSXUzVDBoaGNWVkxDWHU5RDJuazBFUEhiNzZac0RqdENEaWRHTjEKWE9iOWRUWStpSHVTTWRiaFJTbVpuWnlBZFlWOGNEM0hQTzdMN1FLN2tkRGdraEgzQmZFS1gvczZEbzlzTmNwMgpoTUhZRUd3T3U1Q1JML0M2V0RHWG8zNUJPMUwxL2lvL0tEVmFCeGZ1cEFrMnJXL3V4bHNoblQrWElaUDUwUjNuCjdxVmhYaEt5M3YxNDR0dWhIT3FMd2xmRWpNb2lxUCsvNDNzblF1MzdFaEtMRG51RkJGYU1zK0ZKb3crVlVOb0IKeVlRUnZCRUdZTFhSeDFURjZiSlNGTWhISnBtMjV2VHB0UzZoNWFSR3R0dDBTK0dadmlmNlZGcmQrbVBqanFrbgpUVjBhazNhQWpxVm1scEFvRE85dnptUzYvdlhyZkhxMEhsaDdoS0Rrbjc5ZUpEbGxUUFdzcmxVOE12OHFDSmx3Ci84YzFIM256ditJZkZNQVV1TTRPcjZXY0xxbVZzbEtVanNoRDJvVHI2ck91TThkWTdzeGlQMUQ1ZmI3MzN2L2kKUzk4MWtOM2VwZzVnWjlscHJSSXNmVzRoVzFzYjJWbEcxNzNKTS9DY2xLV1d3d0lsc2tDRjFvSm5mS3dDcGxLVQpPS3pTdnQwYXBKSm93S253WVFDalBpMnRIcDI4akYzdGN4a2gyVk5WeGUyU0M0WldTaWg0ZS9qRlI3RTZLem9SCmJEdUpOSHpndWV4YVJzU3FIMkU5VGo0YWhhMjNBQkVCQUFHSkFoOEVHQUVJQUFrRkFtUEhxMlFDR3d3QUNna1EKRHZPUnZVQWFDeUtsbnhBQW1ETjJWRjB3eVBUM0xvR3BxSm12K2FXYUI4c1gyVTQ4TTNVZjdUOGVSWWZJcHBtYwpuR3drSkRGMCtzOHJLTFhJeU52L08vUzEzRDNTeDhmV0dhUTZxL3BWdVVTZG5aKy8vWUVCMjhsSVNiaHRub29UCnY0N2VZdTZjUTdwRE5kanA1Q21ObUVqNENFaVM3RjFBam56eHdiaUg3UUpWTk02MTg2c0hOUy83bk42elNXcGsKcEZBOFgxNDNuZGtwU1JJSWw2SkhGMGNQYURtMzlHL0pDM0did0ZrM2RGWnNrQlAvTWRRTlFIRUowOWN0cDFBbwo4Yml6ZHJhUkl0RSt2amNwc3dscWN1RmNjaDRYVDVveFpKckpTYXBkSWRWcXduU21HUC8weGF2SVNEb2Rvc2ROClNOcUdtYXZBM3lmaHVpNG5pb0U1MnZTT0xIZ0ZuTWZUQVB5VzFXWWV0TTV5VEhBV1JZaWFpUm5iUUQ0VFBCTHcKZ2ZQdlZUeVVRRGMzblFwWGJsaXNaOWRPM09ZWWxQaStKUkhjWUJ0dFA1ZThmMCtjQ0ZRTW82TGtreDhkZmJhRgpPUXp0Snl4WlpvRTFjdTR6bnc2dU9BNGJxTXAvUzBpV2g4TldNbVZSbDFpVVg5bmRhUFZ4dmxhY2tycWZ2a09YCitZNWlwUGRsdUdhYk5tamZsWG92MDdRczJhRVo2UE96Q2xlc0tRVmpkTmdCbHhPUnFtTXdvems2MFJhZ1JlVEMKTUtJV3dKeHJUMGhPSXl1RzQ3L3pyWndRV1J0L29XSzAwbmNOWk1VNmwrSDF1Y09jV3JXWEVWQ2xnajl6d2NsNQpVRHNMQS9ocjBXRHZTVHZQM0w3QWQ2RUltalBob290bnB1bGUwd000YlpyRVBkTnpUVmxKWWRwRlhVcz0KPS9hdDYKLS0tLS1FTkQgUEdQIFBVQkxJQyBLRVkgQkxPQ0stLS0tLQo=";
+        String encodedRes = enc(ori,clientPrivateKeyBass64,bankPublicKeyBass64,"123-123eq0");
+        System.out.println("Base64-encoded PGP message containing encrypted payload:\n" + encodedRes);
+        String encStr =
+                "LS0tLS1CRUdJTiBQR1AgTUVTU0FHRS0tLS0tClZlcnNpb246IEJDUEcgdjEuNjAKCmhRR01BOVhsbmxjcWw4RXhBUXY5RVdGdTB4R2t2c0dvMG5KbHFaMVVqNW5IOVRhRSsveVZSOStINWVieWk0YTkKOUhheVR3b2tMTE5oeDZ2SGxiUmlzRTUzQmwrV3VOaC8rRUYyNG1kSnBaUWRYZ2dkTEJLcXB4WjAycWQ1OEhyeApLRU03Ym5KYzJlWlh2UFF2U09wZVA5cEdoajFEVy9jU00xWm9JNFo4bHJjR3h4dlZldFE1S1BNTGNsbWF3eXMyCmpMaWV1Qm1XN3dLZFJWbk1Delh6V1ZYaitYYWRmdFZRUk5OSkpCRlBxMU44UWhDUXVsWXQ0aTlKOWQ0dnNKTGMKUzYzRldmTnpzcWJydDZqY3pGOXlrUXRSemE4cHlFTDFnQTdFaTRUUGdxY3M2dlcxRzZiTkV6bDFqNFZjalhPdApaMC96NGpkd280MWExdDlTc1F2RHBabS9XRjdhNFpleWIwanZWVGdJN1RzVjVURHZOMXpHVXovcjZnMHNPMVBuCkpsUW5yTmkrOVR6anpzQ2l3eXlvZUpVczY1K2FFNisweFpvayt2S1psejlIZGd4dGpoYVk1THpKOWJpSCtRdzEKR3lSYittS0RqOEM1UnhhMXpOOFBNV3d3WU9CeHhYQW1KMjY1NjFxenQ3UzQzUHV6bTVjWU5sZDdxOG5tdS9RYwpRaGJYWDk5MlNLNE5SSVo5SWMwVjBzU1hBUUIrTGdvbzg5Ny90QzgwSEpra2xxVWJ3R1pxMjdPaHIvQS9RVFpqCllrYmdSVDZGZm02U0JEL3Q0clQzSGtZbHd3T3VGK2dDVVRoa1RsS2xjbCtYTG5QQkhZWXh5cmZHbVJNYUJpUUYKREVlcjduTGRtSUpnTmpuUzBEU3RMQkZPamNyb09MbHZqQmJGaHQ5R3Nlam5KSTMwMFRGQ3ZlamRmbkwzSHYvcQphL3dhRTg2TXFuMUFybFVBVkh6QXpXVUhwYUUyRDdLTzJJdi9uMDBTOEM2OW9kQkU5ZURPZjZKcEMyTjZndWRaCkdEQkRzZFNoK09MOEtucWdSQWg2bTRDeXhHMmFXRjdCTDRPV0xoWW56by9EeFJRT0x6UHpaSmxrZ0d6a1JDaTAKL3NzR2JOcGp1QVNmNXlmK1JldndqRWVVdytrZEVEUXZ1QnB4YUEzN0RkNHFvWFlVeVZoeVpRU3NVVXRqTURTMwpIU2JheXZneUEzVEVJYUlGNWZXaEcrcitFdmFtY2Jrc2QrcVVsWjhYcEFSQ0dYQ1JCR2ZnZExZSGNUOEU4ZzlECjVlcHNwWmRvSVF0Y3RPNHhBengvZmhZS0VQNitaN2R0UGZYTnEzR05pT09hUm10TzdCdE9rYngzVld2MUdRNXIKakRXM01PZEliWGZZTnRQVlQwbzFBVXZqNmU3d2oxUlhBRnEvRUx1bGltOUZVYnNYTzFYaGh6b005cFlUM3RobApIMllHM3Z4K3NaKy9WZEttYXpHc1FWelJzV3VPRDE3b0o1Q2tneWpDK3A3SlVGeWNkRk5XbjJ4WXNhUjJJdTI0CnRjRm9yZFI2UFVuVjdPR2R6M3M5QndWSUZDcHNGK2lCTzByS3VSZzRPeG9Ja1lHNXJkNGNablgwbmpUSWxBdHkKNnV3WXRVWmlGSmVTVEpWUEtSb2FEdWNyZm8wY1cwdCt2cy8xZXpKY2lwTnY0SEZBTTBmS3ZBSUlaQ3RFZ2MybApNV1U5QzJZTHJzeUZoVUNPemdiNmNhYmQxR1I1RGZZd2RlWWFTUjlwS01CRGRVTThUekZRdE92Rm5kZ2RuSGd5CnZLb1REN1REdWVoSUI0bE9JQnRacVIrMGQ1MGtIbmVVNXArUE5aYWpOVWkwSlBDdElhMUNhVTFSZ0VRMlJ2S1oKV2VCQmNZNnQ5d3YveGFXUlBxRFB4djlqZEkwUDlIalFaZVBHVUw2WEF4YWF3QXhtQWZDK1pDamxVQUhvQ2ZRRgozVGFTOExIZHgyN3hKQ1YvMlRFdG1MRXd0S0pwcTdKS1QzSjl1aUZHenQxeFlsZ09QdlBnTlRJd2pJdWRIaDVTClZFZ0hia3FXZHFpck9halcyNWhROGxLZ3RVblJESHVsV2poWHhteU4yemt3T0lUMTcvSitoQjdId0ZQS0RBWmYKUzQ4RnlKQmgwOFJod2hWb2p6dUY5dlp1K0U4QXFMUWsyVm9LVGxJSlRvV3FZOXNPRG9DS3RmTFArdWZmeC9teApCVHZBZFUxWWltNXpaSVpMWHFEYWVDNDVsclM1OTlnWXJ3R1lKSVNzMERKTC9XUy9MK0RwWnl2WS94THFCRGRqClpmNTJ1NitQVEorUFZXSm5ydEVPU2NpNytMa1pZaFNxR01yUlRQQUQ0aGZwMnpTa0ZiT2NmVXpsM2NJSzZyUVUKOVc0YTZwQkRYWHBleWtWMVlIYXh1cTN1OXRUR1U4NjJ6S2xXRERweG9Mc09WSm9HQWUwVGFxZ0NRUWVqTitXWQpmdTdTcHh2ZXBmK2dIWENCVE84S21jbXNxbGZDTWtyMXk1Q2w4dmhuYXZrZXpqWjRDdHpBVUhQdjFRcG5ZN0RlCkp6b2tiUTYwZ0pyTHo1MkxiMnA1ZS83c1ZJZm1pQ2JMaWIyZzdaV1gyTUJidEtqZm1aRnVienVmZDV4VkFoYmEKelhMS0YxbXZpS1JLcXQ0bUcrWXVRVVBTdjFDSjh2OW85QmQzSVkyT1NUajVJbDBzSDZ3RlJwQjdCeXh4aUlLZQoyMUFHNFVZNk0wUU5iSGpNWGcwaDdQb0p3TGs2TVVZODY4d2E0OVJWVzYra3Q4dTRnYS9QOE1iNHUvRzFuOVZkClM4ODQ5Uk9oSUF4Vk12WWYvV2h1eVFyZkQ5T2I0QWU2VjFocnJ0azZEcGp2dERpMFdMR2d5ODRiOHBScFhialMKTDZYc3dHRWJpYzJMY0g2UEtLbGxjZzhxaXhSdWloTXhZc1RoQ3Vsc0h0ZWlkMjcweHZyaGdCNWR6M2hudkQ1Qwo1M3NxSS8xUEVKSGhzODJoRGZYdHZvOGhTQlVQK1FBRG1lNFRYTTZaR2U2bmREeHlHQlU1YlArc0t6aWdyaFM3Cmluek84VlY0d08yNHk4T2VtNjl2RkNsTWs2TG1EU3RIWjJxdVVyc1pOU1lPUGVxdGdxbnRsWHc9Cj14WFNiCi0tLS0tRU5EIFBHUCBNRVNTQUdFLS0tLS0K"
+                ;
+        String res = dec(encStr, clientPrivateKeyBass64, bankPublicKeyBass64, "123-123eq0");
+        System.out.println("Decrypted message:\n" + res);
+
+    }
+}
